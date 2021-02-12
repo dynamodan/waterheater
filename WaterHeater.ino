@@ -18,6 +18,12 @@
 #include <SPI.h>
 #include <Ethernet.h>
 
+// thermistor and voltage divider characteristics:
+#define THERMISTORNOMINAL 10000
+#define TEMPERATURENOMINAL 25
+#define BCOEFFICIENT 3950
+#define SERIESRESISTOR 10990
+
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
@@ -35,15 +41,55 @@ EthernetServer server(8000);
 
 void setup()
 {
-  analogReference(INTERNAL);
+  analogReference(EXTERNAL);
+  pinMode(12, OUTPUT);
+  digitalWrite(12, HIGH);
+  
+  Serial.begin(9600); // open the serial port at 9600 bps:
   
   // start the Ethernet connection and the server:
   Ethernet.begin(mac, ip);
   server.begin();
+
+  
+  
+}
+
+void debugSerial() {
+  // debugging:
+
+  // reading water temps:
+  waterTemp1 = analogRead(1);
+  waterTemp2 = analogRead(2);
+
+  // read the thermocouple:
+  fireTemp = analogRead(0);
+  
+  Serial.print("time: ");
+  Serial.print(millis());
+  Serial.print("\n");
+  Serial.print("top: ");
+  Serial.print(ohmsToF(waterTemp2), 1);
+  Serial.print("F<br />bottom: ");
+  Serial.print(ohmsToF(waterTemp1), 1);
+  Serial.print("F\n");
+  Serial.print("analogRead: ");
+  Serial.print(waterTemp1);
+  Serial.print("\n");
+  Serial.print("fire: ");
+  Serial.print(fireTemp);
+  Serial.print("\n");
+  delay(1500);
+  debugSerial();
 }
 
 void loop()
 {
+  
+  debugSerial();  
+  return;
+  
+  
   // listen for incoming clients
   EthernetClient client = server.available();
   if (client) {
@@ -120,16 +166,25 @@ double ohmsToF(int rawTemp) {
   double Temp;
   float resistor;
   float resistance;
-  resistor = 27000.0; // a 27k resistor and using the 3.3v voltage for division
-  // resistance = (resistor / (1 - (rawTemp / 3300))) - resistor;
-  // resistance = rawTemp / 3300.0; // use this for 3.3v reference
-  resistance = rawTemp / 5000.0; // use this for 5.0v reference
+  float steinhart;
+  resistor = SERIESRESISTOR; // a 27k resistor and using the 3.3v voltage for division
+  resistance = rawTemp / 1024.0; // use this for 5.0v reference
   resistance = (resistor / (1 - resistance)) - resistor;
 
-  Temp = log(resistance);
-  Temp = 1 / (0.001129148 + (0.000234125 + (0.0000000876741 * Temp * Temp ))* Temp );
-  Temp = Temp - 273.15;            // Convert Kelvin to Celcius
-  Temp = (Temp * 9.0) / 5.0 + 32.0;
+  steinhart = resistance / THERMISTORNOMINAL;
+  steinhart = log(steinhart);
+  steinhart /= BCOEFFICIENT;
+  steinhart += 1.0 / (TEMPERATURENOMINAL + 273.15);
+  steinhart = 1.0 / steinhart;
+  steinhart -= 273.15;
+
+  //Temp = log(resistance);
+  //Temp = 1 / (0.001129148 + (0.000234125 + (0.0000000876741 * Temp * Temp ))* Temp );
+  //Temp = Temp - 273.15;            // Convert Kelvin to Celcius
+  
+  // Convert Celcius to F
+  Temp = (steinhart * 9.0) / 5.0 + 32.0;
+  
   return Temp;
 }
 
