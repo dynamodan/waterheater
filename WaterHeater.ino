@@ -41,11 +41,9 @@ EthernetServer server(8000);
 
 void setup()
 {
-  analogReference(EXTERNAL);
-  pinMode(12, OUTPUT);
-  digitalWrite(12, HIGH);
-  
-  Serial.begin(9600); // open the serial port at 9600 bps:
+  analogReference(EXTERNAL); // use a forward-biased silicon diode for 0.6-0.7v
+  pinMode(5, INPUT_PULLUP); // weak pullup (this is checked for LOW later for debugging)
+
   
   // start the Ethernet connection and the server:
   Ethernet.begin(mac, ip);
@@ -56,6 +54,11 @@ void setup()
 }
 
 void debugSerial() {
+  Serial.begin(9600); // open the serial port at 9600 bps:
+  debugSerialLoop();
+}
+
+void debugSerialLoop() {
   // debugging:
 
   // reading water temps:
@@ -70,7 +73,7 @@ void debugSerial() {
   Serial.print("\n");
   Serial.print("top: ");
   Serial.print(ohmsToF(waterTemp2), 1);
-  Serial.print("F<br />bottom: ");
+  Serial.print("F\nbottom: ");
   Serial.print(ohmsToF(waterTemp1), 1);
   Serial.print("F\n");
   Serial.print("analogRead: ");
@@ -80,14 +83,15 @@ void debugSerial() {
   Serial.print(fireTemp);
   Serial.print("\n");
   delay(1500);
-  debugSerial();
+  debugSerialLoop();
 }
 
 void loop()
 {
   
-  debugSerial();  
-  return;
+  if(digitalRead(5) == LOW) {
+    debugSerial(); // this never returns, you have to unground pin 5, and reset. 
+  }
   
   
   // listen for incoming clients
@@ -191,26 +195,30 @@ double ohmsToF(int rawTemp) {
 
 void firePrint(EthernetClient &client, unsigned int fireTemp) {
   client.print("<br />fire status is <br /><b>");
-  if(fireTemp > 16) {
+  if(fireTemp > 256) {
+    client.print("thermocouple error");
+  }
+  
+  else if(fireTemp > 32) {
     client.print("ROARING FIRE");
   }
   
-  else if(fireTemp > 12) {
+  else if(fireTemp > 24) {
     client.print("HOT FIRE");
   }
   
-  else if(fireTemp > 9) {
+  else if(fireTemp > 18) {
     client.print("MED FIRE");
   }
   
-  else if(fireTemp > 6) {
+  else if(fireTemp > 12) {
     client.print("HOT COALS");
   }
-  else if(fireTemp > 2) {
+  else if(fireTemp > 8) {
     client.print("MED COALS");
   }
 
-  else if(fireTemp > 0) {
+  else if(fireTemp > 4) {
     client.print("LOW COALS");
   }
   
@@ -224,11 +232,11 @@ void firePrint(EthernetClient &client, unsigned int fireTemp) {
 
 void stylePrint(EthernetClient &client, unsigned int fireTemp) {
   client.println("<style>p.big b{ color:");
-  if(fireTemp > 16) {
+  if(fireTemp > 32) {
     client.println("red;background:yellow } ");
   }
   
-  else if(fireTemp > 6) {
+  else if(fireTemp > 12) {
     client.println("white;background:red; white-space:nowrap; } ");
   }
   
