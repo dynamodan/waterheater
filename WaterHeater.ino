@@ -18,6 +18,7 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <LiquidCrystal.h>
+#include <WString.h>
 
 
 // thermistor and voltage divider characteristics:
@@ -37,7 +38,9 @@ int waterTemp1 = 0;
 int waterTemp2 = 0;
 unsigned long lastMillis = 0;
 int fireStarting = 0;
-
+byte indicatorToggle = 0;
+String draftString = String(14);
+String httpGetString = String(100);
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use 
@@ -52,14 +55,27 @@ LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
 void setup()
 {
+
+  // disable the SD card on the ethernet shield:
+  pinMode(4, OUTPUT);
+  digitalWrite(4, HIGH);
+
+  // start the Ethernet connection and the server:
+  Ethernet.begin(mac, ip);
+  server.begin();
+  digitalWrite(4, LOW);
+  
+  
   // set up the LCD's number of columns and rows:
   lcd.begin(20, 4);
   // Print a message to the LCD.
   lcd.print("Two-Tank Wood Burner");
   lcd.setCursor(0, 1);
-  lcd.print("T1:       T2:       ");
+  lcd.print("Tank1:    Tank2:    ");
   lcd.setCursor(0, 2);
-  lcd.print("Fire:         Dft:  ");
+  lcd.print("Fire:               ");
+  lcd.setCursor(0, 3);
+  lcd.print("Draft:              ");
 
   analogReference(DEFAULT); // use 5v reference
 
@@ -71,25 +87,22 @@ void setup()
 
   // set pin 7 as digital output, for opening/closing the draft:
   pinMode(7, OUTPUT);
-
-  
   
   // setup timer interrupt for handling events, writing LCD, etc:
   OCR0A = 0xAF;
   TIMSK0 |= _BV(OCIE0A);
   lastMillis = millis();
   
-  // start the Ethernet connection and the server:
-  Ethernet.begin(mac, ip);
-  server.begin();
+  
  
 }
 
 // one-second loop here:
 SIGNAL(TIMER0_COMPA_vect) {
   unsigned long currentMillis = millis();
+  
   // once every second:
-  if(currentMillis - lastMillis > 1000) {
+  if(currentMillis - lastMillis > 2000) {
     // print the T1 and T2 temp:
     // reading water temps:
     waterTemp1 = analogRead(1);
@@ -99,28 +112,28 @@ SIGNAL(TIMER0_COMPA_vect) {
     if(analogRead(5) < 500) {
       fireStarting = 900;
     }
-    if(fireStarting > 0) { fireStarting--; }
+    if(fireStarting > 0) { fireStarting--; fireStarting--; } // because we get called every 2 seconds
     
     // take an average to determine what we should do about draft:
     // float waterTempF = ohmsToF((waterTemp1 + waterTemp2) / 2);
     float waterTempF = ohmsToF(waterTemp2); // or not...
     
-    lcd.setCursor(4, 1);
+    lcd.setCursor(6, 1);
     if(waterTemp1 > 1000) {
       lcd.print("+++  ");
     } else if(waterTemp1 < 10) {
       lcd.print("---  ");
     } else {
-      lcd.print(ohmsToF(waterTemp1));
+      lcd.print(String(ohmsToF(waterTemp1), 0));
       lcd.print("F");
     }
-    lcd.setCursor(14, 1);
+    lcd.setCursor(16, 1);
     if(waterTemp2 > 1000) {
       lcd.print("+++  ");
     } else if(waterTemp2 < 10) {
       lcd.print("---  ");
     } else {
-      lcd.print(ohmsToF(waterTemp2));
+      lcd.print(String(ohmsToF(waterTemp2), 0));
       lcd.print("F");
     }
     
@@ -129,7 +142,7 @@ SIGNAL(TIMER0_COMPA_vect) {
     if(fireTemp > 0) {
       float fireTempF = (fireTemp / .54) + 70;
       lcd.setCursor(5, 2);
-      lcd.print(fireTempF);
+      lcd.print(String(fireTempF, 0));
       lcd.print("F ");
     } else {
       lcd.setCursor(5, 2);
@@ -138,36 +151,45 @@ SIGNAL(TIMER0_COMPA_vect) {
 
     // do draft control logic:
     // is there a fire?
-    lcd.setCursor(18, 2);
+    lcd.setCursor(6, 3);
+    draftString = "";
     if(fireTemp > 50 && waterTempF < 140) { // fire is going, and we want hotter
       // open the draft:
       digitalWrite(7, HIGH);
-      lcd.print("F+");
+      draftString = "Fire increase ";
     } else if(waterTempF > 160) { // water is too hot, we want to slow any fires
       digitalWrite(7, LOW);
-      lcd.print("F-");
+      draftString = "Fire decrease ";
     } else if(fireStarting > 0) { // we are starting or stoking fire and want draft open
       digitalWrite(7, HIGH);
-      lcd.print("FS");
+      draftString = "Fire starting ";
     } else {
       digitalWrite(7, LOW); // fire is out, we want to close draft to hold heat
-      lcd.print("--");
+      draftString = ("Clamping stack");
     }
+    lcd.print(draftString);
     
-    
-    
-    // print the number of seconds since reset:
-    lcd.setCursor(0, 3);
-    lcd.print("millis: ");
-    lcd.print(millis());
-    lcd.print("  ");
     lastMillis = currentMillis;
+
+    // toggle the indicator:
+    if(indicatorToggle == 0) {
+      indicatorToggle = 1;
+      lcd.setCursor(3, 0);
+      lcd.print("-");
+    } else {
+      indicatorToggle = 0;
+      lcd.setCursor(3, 0);
+      lcd.print(" ");
+    }
   }
   
   // when millis() overflows:
   else if(currentMillis < lastMillis) {
     lastMillis = currentMillis;
   }
+
+  
+  
 }
 
 void debugSerial() {
@@ -219,10 +241,23 @@ void loop()
     while (client.connected()) {
       if (client.available()) {
         char c = client.read();
+        
+        // get the query string in case we are receiving a command:
+        if(httpGetString.length() < 100) {
+          httpGetString.concat(c);
+        }
+        
         // if you've gotten to the end of the line (received a newline
         // character) and the line is blank, the http request has ended,
         // so you can send a reply
         if (c == '\n' && currentLineIsBlank) {
+          if(httpGetString.indexOf("draft-open") > -1) {
+            fireStarting = 900;
+          } else if(httpGetString.indexOf("draft-close") > -1) {
+            fireStarting = 0;
+          }
+          
+          
           // send a standard http response header
           client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: text/html");
@@ -235,20 +270,25 @@ void loop()
 
           // output the complete page with various readings:
           client.println("<html><head>");
-          client.println("<meta http-equiv=\"refresh\" location=\"/\" content=\"10\">");
+          client.println("<meta http-equiv=\"refresh\" content=\"10;url=/\">");
           client.println("<html><head>");
           stylePrint(client, fireTemp);
           client.println("</head><body>");
           client.println("<form><table class=\"main\" align=\"center\" border=\"1\"><tr><td align=\"center\" valign=\"middle\">");
           client.print(millis());
-          client.println("<br /><br /><p class=\"big\">-- Water Heater Stats --<br /><br />");
+          client.println("<br /><br /><p class=\"big\">Two-Tank Wood Burner<br>Status<br /><br />");
           
           waterPrint(client, waterTemp1, waterTemp2);
           
           firePrint(client, fireTemp);
+
+          draftPrint(client, draftString);
           
-          client.println("</p><br /><input type=\"button\" onclick=\"javascript:location.reload();\" value=\"Check again\"><br />");
-          client.println("</td></tr></table></body></html>");
+          client.println("</p><br /><input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');\" value=\"Check again\"><br />");
+          client.println("</td></tr><tr><td><pre>");
+          client.println(httpGetString);
+          client.println("</pre></table></body></html>");
+          httpGetString = "";
           
           // done, outta here:
           break;
@@ -270,12 +310,23 @@ void loop()
   }
 }
 
+void draftPrint(EthernetClient &client, String draftStatus) {
+  client.print("Draft status: ");
+  client.print(draftStatus);
+  if(fireStarting > 0) {
+    client.print(" (");
+    client.print(fireStarting);
+    client.print(" seconds)");
+  }
+  client.print("<br />");
+}
+
 void waterPrint(EthernetClient &client, int waterTemp1, int waterTemp2) {
-  client.print("top: ");
-  client.print(ohmsToF(waterTemp2), 1);
-  client.print("F<br />bottom: ");
-  client.print(ohmsToF(waterTemp1), 1);
-  client.println("F<br />");
+  client.print("Tank1: ");
+  client.print(ohmsToF(waterTemp2), 0);
+  client.print("&deg;F<br />Tank2: ");
+  client.print(ohmsToF(waterTemp1), 0);
+  client.println("&deg;F<br />");
   
 }
 
@@ -311,49 +362,33 @@ double ohmsToF(int rawTemp) {
 
 
 void firePrint(EthernetClient &client, unsigned int fireTemp) {
-  client.print("<br />fire status is <br /><b>");
-  if(fireTemp > 256) {
+  client.print("<br />Fire Temp: <b>");
+  float floatFireTempF = (fireTemp / .54) + 70;
+  if(floatFireTempF > 2000) {
     client.print("thermocouple error");
   }
-  
-  else if(fireTemp > 32) {
-    client.print("ROARING FIRE");
-  }
-  
-  else if(fireTemp > 24) {
-    client.print("HOT FIRE");
-  }
-  
-  else if(fireTemp > 18) {
-    client.print("MED FIRE");
-  }
-  
-  else if(fireTemp > 12) {
-    client.print("HOT COALS");
-  }
-  else if(fireTemp > 8) {
-    client.print("MED COALS");
+
+  else if(floatFireTempF < 120) {
+    client.print("(out)");
   }
 
-  else if(fireTemp > 4) {
-    client.print("LOW COALS");
-  }
-  
   else {
-    client.print("-- OUT --");
+    client.print(floatFireTempF, 0);
+    client.print("&deg;F");
   }
 
-  client.println("</b>");
+  client.println("</b><br />");
   
 }
 
 void stylePrint(EthernetClient &client, unsigned int fireTemp) {
+  float floatFireTempF = (fireTemp / .54) + 70;
   client.println("<style>p.big b{ color:");
-  if(fireTemp > 32) {
+  if(floatFireTempF > 300) {
     client.println("red;background:yellow } ");
   }
   
-  else if(fireTemp > 12) {
+  else if(floatFireTempF > 200) {
     client.println("white;background:red; white-space:nowrap; } ");
   }
   
