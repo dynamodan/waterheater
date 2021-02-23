@@ -63,6 +63,7 @@ void setup()
   // start the Ethernet connection and the server:
   Ethernet.begin(mac, ip);
   server.begin();
+  delay(1000);
   digitalWrite(4, LOW);
   
   
@@ -257,37 +258,29 @@ void loop()
             fireStarting = 0;
           }
           
-          
-          // send a standard http response header
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: text/html");
-          client.println();
-          
           // get the readings:
-          fireTemp = analogRead(0);
-          waterTemp1 = analogRead(1);
-          waterTemp2 = analogRead(2);
+          // fireTemp = analogRead(0);
+          // waterTemp1 = analogRead(1);
+          // waterTemp2 = analogRead(2);
 
           // output the complete page with various readings:
-          client.println("<html><head>");
-          client.println("<meta http-equiv=\"refresh\" content=\"10;url=/\">");
-          client.println("<html><head>");
+          client.print(F("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><head>\n<meta http-equiv=\"refresh\" content=\"10;url=/\">\n"));
           stylePrint(client, fireTemp);
-          client.println("</head><body>");
-          client.println("<form><table class=\"main\" align=\"center\" border=\"1\"><tr><td align=\"center\" valign=\"middle\">");
+          client.print(F("</head><body><form><table class=\"main\" align=\"center\" border=\"1\"><tr><td align=\"center\" valign=\"middle\">\n"));
           client.print(millis());
-          client.println("<br /><br /><p class=\"big\">Two-Tank Wood Burner<br>Status<br /><br />");
+          client.println(F("<br /><br /><p class=\"big\">Two-Tank Wood Burner<br>Status<br /><br />"));
           
-          waterPrint(client, waterTemp1, waterTemp2);
+          waterPrint(client, waterTemp2, waterTemp1);
           
           firePrint(client, fireTemp);
 
           draftPrint(client, draftString);
           
-          client.println("</p><br /><input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');\" value=\"Check again\"><br />");
-          client.println("</td></tr><tr><td><pre>");
-          client.println(httpGetString);
-          client.println("</pre></table></body></html>");
+          client.print(F("</p><br /><input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');\" value=\"Check again\"><br /></td></tr>\n"));
+          // client.print("<tr><td><pre>"); // debugging the get string
+          // client.print(httpGetString);
+          // client.print("</pre></td></tr>")
+          client.print("</table></body></html>\n");
           httpGetString = "";
           
           // done, outta here:
@@ -304,7 +297,7 @@ void loop()
       }
     }
     // give the web browser time to receive the data
-    delay(1);
+    delay(100);
     // close the connection:
     client.stop();
   }
