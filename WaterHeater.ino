@@ -6,13 +6,16 @@
  
  Circuit:
  * Ethernet shield attached to pins 10, 11, 12, 13
- * Analog inputs attached to pins A0 through A5 (optional)
+ * Various sensors attached to analog pins
  
  created 18 Dec 2009
  by David A. Mellis
  modified 9 Nov 2013
  by Dan Hartman
  
+ updated February 24, 2021
+ by Dan Hartman
+  
  */
 
 #include <SPI.h>
@@ -33,6 +36,7 @@ IPAddress ip(192,168,1,98);
 unsigned int fireTemp = 0;
 int waterTemp1 = 0;
 int waterTemp2 = 0;
+unsigned long lastMillis = 0;
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use 
@@ -44,11 +48,35 @@ void setup()
   analogReference(EXTERNAL); // use a forward-biased silicon diode for 0.6-0.7v
   pinMode(5, INPUT_PULLUP); // weak pullup (this is checked for LOW later for debugging)
 
+  // setup timer interrupt for handling events, writing LCD, etc:
+  OCR0A = 0xAF;
+  TIMSK0 |= _BV(OCIE0A);
+  lastMillis = millis();
   
   // start the Ethernet connection and the server:
   Ethernet.begin(mac, ip);
   server.begin();
 
+  
+  
+}
+
+// one-second loop here, do the analog reads here instead of inside web server loop:
+SIGNAL(TIMER0_COMPA_vect) {
+  unsigned long currentMillis = millis();
+  
+  // once every second:
+  if(currentMillis - lastMillis > 1000) {
+    // reading water temps:
+    waterTemp1 = analogRead(1);
+    waterTemp2 = analogRead(2);
+    fireTemp = analogRead(0);
+    lastMillis = currentMillis;
+  } 
+  
+  else if(currentMillis < lastMillis) {
+    lastMillis = currentMillis;
+  }
   
   
 }
@@ -112,9 +140,9 @@ void loop()
           client.println();
           
           // get the readings:
-          fireTemp = analogRead(0);
-          waterTemp1 = analogRead(1);
-          waterTemp2 = analogRead(2);
+          // fireTemp = analogRead(0);
+          // waterTemp1 = analogRead(1);
+          // waterTemp2 = analogRead(2);
 
           // output the complete page with various readings:
           client.println("<html><head>");
@@ -246,4 +274,3 @@ void stylePrint(EthernetClient &client, unsigned int fireTemp) {
   
   client.println(".main{height:100%;width:100%;} .big{font-size:40px;} input{width:100px;height:75px;}</style>");
 }
-
