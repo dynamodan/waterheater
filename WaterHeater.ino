@@ -276,7 +276,9 @@ void loop()
 
           draftPrint(client, draftString);
           
-          client.print(F("</p><br /><input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');\" value=\"Check again\"><br /></td></tr>\n"));
+          client.print(F("</p><br /><input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');\" value=\"Refresh\"><br />\n"));
+          client.print(F("<input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '')+'/draft-open';\" value=\"Open draft\"><br />\n"));
+          client.print(F("<input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '')+'/draft-close';\" value=\"Close draft\"><br /></td></tr>\n"));
           // client.print("<tr><td><pre>"); // debugging the get string
           // client.print(httpGetString);
           // client.print("</pre></td></tr>")
@@ -389,5 +391,5 @@ void stylePrint(EthernetClient &client, unsigned int fireTemp) {
     client.println("white;background:#000000; } ");
   }
   
-  client.println(".main{height:100%;width:100%;} .big{font-size:40px;} input{width:100px;height:75px;}</style>");
+  client.println(F(".main{height:100%;width:100%;} .big{font-size:40px;} input{width:200px;height:100px;margin-bottom:1em;font-size:35px;}</style>"));
 }
