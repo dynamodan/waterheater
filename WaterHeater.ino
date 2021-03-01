@@ -56,9 +56,14 @@ LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 void setup()
 {
 
+  
+  
   // disable the SD card on the ethernet shield:
   pinMode(4, OUTPUT);
   digitalWrite(4, HIGH);
+  
+  delay(40);
+  lcd.begin(20, 4);
 
   // start the Ethernet connection and the server:
   Ethernet.begin(mac, ip);
@@ -68,7 +73,6 @@ void setup()
   
   
   // set up the LCD's number of columns and rows:
-  lcd.begin(20, 4);
   // Print a message to the LCD.
   lcd.print("Two-Tank Wood Burner");
   lcd.setCursor(0, 1);
@@ -121,18 +125,18 @@ SIGNAL(TIMER0_COMPA_vect) {
     
     lcd.setCursor(6, 1);
     if(waterTemp1 > 1000) {
-      lcd.print("+++  ");
+      lcd.print("+++ ");
     } else if(waterTemp1 < 10) {
-      lcd.print("---  ");
+      lcd.print("--- ");
     } else {
       lcd.print(String(ohmsToF(waterTemp1), 0));
       lcd.print("F");
     }
     lcd.setCursor(16, 1);
     if(waterTemp2 > 1000) {
-      lcd.print("+++  ");
+      lcd.print("+++ ");
     } else if(waterTemp2 < 10) {
-      lcd.print("---  ");
+      lcd.print("--- ");
     } else {
       lcd.print(String(ohmsToF(waterTemp2), 0));
       lcd.print("F");
@@ -140,34 +144,54 @@ SIGNAL(TIMER0_COMPA_vect) {
     
     // print the Fire temp:
     fireTemp = analogRead(0);
+    float fireTempF = (fireTemp / .54) + 70;
     if(fireTemp > 0) {
-      float fireTempF = (fireTemp / .54) + 70;
       lcd.setCursor(5, 2);
       lcd.print(String(fireTempF, 0));
       lcd.print("F ");
     } else {
       lcd.setCursor(5, 2);
-      lcd.print("---    ");
+      lcd.print("---   ");
     }
 
     // do draft control logic:
     // is there a fire?
     lcd.setCursor(6, 3);
-    draftString = "";
-    if(fireTemp > 50 && waterTempF < 140) { // fire is going, and we want hotter
-      // open the draft:
-      digitalWrite(7, HIGH);
-      draftString = "Fire increase ";
-    } else if(waterTempF > 160) { // water is too hot, we want to slow any fires
-      digitalWrite(7, LOW);
-      draftString = "Fire decrease ";
-    } else if(fireStarting > 0) { // we are starting or stoking fire and want draft open
-      digitalWrite(7, HIGH);
-      draftString = "Fire starting ";
-    } else {
-      digitalWrite(7, LOW); // fire is out, we want to close draft to hold heat
-      draftString = ("Clamping stack");
+    draftString = "---";
+    
+    // fire is going:
+    if(fireTempF > 150) {
+      
+      
+      if(waterTempF < 140) { // fire is going, and we want hotter
+        // open the draft:
+        digitalWrite(7, HIGH);
+        draftString = "Fire increase ";
+      } 
+      
+      else if(waterTempF > 160) { // water is too hot, we want to slow any fires
+        digitalWrite(7, LOW);
+        draftString = "Fire decrease ";
+      } 
+      
+      else if(fireStarting > 0) { // water seems hot enough, but we want more fire
+        digitalWrite(7, HIGH);
+        draftString = "Manually open ";
+      }
+      
+    } 
+    
+    // fire is out:
+    else {
+      if(fireStarting > 0) {
+        digitalWrite(7, HIGH); // we are starting or stoking fire and want draft open
+        draftString = "Startup mode  ";
+      } else {
+        digitalWrite(7, LOW); // fire is out, we want to close draft to hold heat
+        draftString = "Holding heat  ";
+      }
     }
+    
     lcd.print(draftString);
     
     lastMillis = currentMillis;
