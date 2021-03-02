@@ -29,14 +29,18 @@
 
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xEF };
 IPAddress ip(192,168,1,98);
+byte gateway[] = { 192, 168, 1, 6 };
+byte dns[] = { 8, 8, 4, 4 };
+byte subnet[] = { 255, 255, 255, 0 };
 
 // these are for the analogReads:
 unsigned int fireTemp = 0;
 int waterTemp1 = 0;
 int waterTemp2 = 0;
 unsigned long lastMillis = 0;
+unsigned long lastWebCheck = 0;
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use 
@@ -52,14 +56,17 @@ void setup()
   OCR0A = 0xAF;
   TIMSK0 |= _BV(OCIE0A);
   lastMillis = millis();
+  lastWebCheck = millis();
   
   // start the Ethernet connection and the server:
-  Ethernet.begin(mac, ip);
+  Ethernet.begin(mac, ip, dns, gateway, subnet);
   server.begin();
 
   
   
 }
+
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 // one-second loop here, do the analog reads here instead of inside web server loop:
 SIGNAL(TIMER0_COMPA_vect) {
@@ -71,15 +78,25 @@ SIGNAL(TIMER0_COMPA_vect) {
     waterTemp1 = analogRead(1);
     waterTemp2 = analogRead(2);
     fireTemp = analogRead(0);
+
+    // check how long it's been since we reset the ethernet:
+    if(millis() - lastWebCheck > 300000) { // it's been 5 minutes.  Do a reset.
+      resetFunc();
+    }
+    
     lastMillis = currentMillis;
-  } 
+  }
   
   else if(currentMillis < lastMillis) {
     lastMillis = currentMillis;
   }
-  
-  
+
+  // check how long it's been since we reset the ethernet:
+  if(millis() - lastWebCheck > 300000) { // it's been 5 minutes.  Do a reset.
+    resetFunc();
+  }
 }
+
 
 void debugSerial() {
   Serial.begin(9600); // open the serial port at 9600 bps:
@@ -110,6 +127,21 @@ void debugSerialLoop() {
   Serial.print("fire: ");
   Serial.print(fireTemp);
   Serial.print("\n");
+
+  if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+    Serial.println("Ethernet shield was not found.");
+  }
+  else if (Ethernet.hardwareStatus() == EthernetW5100) {
+    Serial.println("W5100 Ethernet controller detected.");
+  }
+  else if (Ethernet.hardwareStatus() == EthernetW5200) {
+    Serial.println("W5200 Ethernet controller detected.");
+  }
+  else if (Ethernet.hardwareStatus() == EthernetW5500) {
+    Serial.println("W5500 Ethernet controller detected.");
+  }
+
+  
   delay(1500);
   debugSerialLoop();
 }
@@ -145,21 +177,17 @@ void loop()
           // waterTemp2 = analogRead(2);
 
           // output the complete page with various readings:
-          client.println("<html><head>");
-          client.println("<meta http-equiv=\"refresh\" location=\"/\" content=\"10\">");
-          client.println("<html><head>");
+          client.println(F("<html><head><meta http-equiv=\"refresh\" location=\"/\" content=\"10\">"));
           stylePrint(client, fireTemp);
-          client.println("</head><body>");
-          client.println("<form><table class=\"main\" align=\"center\" border=\"1\"><tr><td align=\"center\" valign=\"middle\">");
+          client.println(F("<title>40-gallon</title></head><body><form><table class=\"main\" align=\"center\" border=\"1\"><tr><td align=\"center\" valign=\"middle\">"));
           client.print(millis());
           client.println("<br /><br /><p class=\"big\">-- Water Heater Stats --<br /><br />");
           
           waterPrint(client, waterTemp1, waterTemp2);
           
           firePrint(client, fireTemp);
-          
-          client.println("</p><br /><input type=\"button\" onclick=\"javascript:location.reload();\" value=\"Check again\"><br />");
-          client.println("</td></tr></table></body></html>");
+
+          client.println(F("</p><br /><input type=\"button\" onclick=\"javascript:location.reload();\" value=\"Check again\"><br /></td></tr></table></body></html>"));
           
           // done, outta here:
           break;
@@ -178,6 +206,7 @@ void loop()
     delay(1);
     // close the connection:
     client.stop();
+    lastWebCheck = millis();
   }
 }
 
