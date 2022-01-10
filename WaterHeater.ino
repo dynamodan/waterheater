@@ -17,6 +17,7 @@
 
 #include <SPI.h>
 #include <Ethernet.h>
+#include <utility/w5100.h>
 #include <LiquidCrystal.h>
 #include <WString.h>
 
@@ -26,17 +27,23 @@
 #define TEMPERATURENOMINAL 25
 #define BCOEFFICIENT 3950
 #define SERIESRESISTOR 10990
+#define EthernetResetMillis 300000 // 300 seconds = 5 minutes
 
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-IPAddress ip(192,168,1,96);
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xEB };
+IPAddress ip(192,168,1,94);
+byte gateway[] = { 192, 168, 1, 6 };
+byte dns[] = { 8, 8, 4, 4 };
+byte subnet[] = { 255, 255, 255, 0 };
 
 // these are for the analogReads:
 unsigned int fireTemp = 0;
 int waterTemp1 = 0;
 int waterTemp2 = 0;
 unsigned long lastMillis = 0;
+unsigned long lastWebCheck = 0;
+unsigned long lastEthernetReset = 0; // debugging
 int fireStarting = 0;
 byte indicatorToggle = 0;
 String draftString = String(14);
@@ -66,8 +73,8 @@ void setup()
   lcd.begin(20, 4);
 
   // start the Ethernet connection and the server:
-  Ethernet.begin(mac, ip);
-  server.begin();
+  resetEthernet();
+  
   delay(1000);
   digitalWrite(4, LOW);
   
@@ -97,9 +104,25 @@ void setup()
   OCR0A = 0xAF;
   TIMSK0 |= _BV(OCIE0A);
   lastMillis = millis();
-  
+  lastWebCheck = millis();
   
  
+}
+
+void resetEthernet() {
+  delay(50);             //wait for voltage to stabilize
+  pinMode(A4, OUTPUT);   //pin connected to w5100 shield's reset
+  digitalWrite(A4, LOW);  //pull line low for 100ms to reset ethernet shield
+  delay(100);
+  digitalWrite(A4, HIGH);  //set line high and now ignore pin the rest of the time
+  delay(100);
+  
+  W5100.initialized = false; // this requires a little hackery of w5100.cpp and w5100.h
+  Ethernet.begin(mac, ip, dns, gateway, subnet); // this calls softReset() and some other stuff
+  server.begin();
+  lastMillis = millis();
+  lastWebCheck = millis();
+  lastEthernetReset = millis();
 }
 
 // one-second loop here:
@@ -112,6 +135,13 @@ SIGNAL(TIMER0_COMPA_vect) {
     // reading water temps:
     waterTemp1 = analogRead(1);
     waterTemp2 = analogRead(2);
+    
+    // check how long it's been since we reset the ethernet:
+    if(millis() - lastWebCheck > EthernetResetMillis) { // it's been 5 minutes.  Do a reset.
+      // resetFunc();
+      resetEthernet();
+    }
+
 
     // see if the user called for draft at starting or stoking:
     if(analogRead(5) < 500) {
@@ -302,11 +332,14 @@ void loop()
           
           client.print(F("</p><br /><input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');\" value=\"Refresh\"><br />\n"));
           client.print(F("<input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '')+'/draft-open';\" value=\"Open draft\"><br />\n"));
-          client.print(F("<input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '')+'/draft-close';\" value=\"Close draft\"><br /></td></tr>\n"));
+          client.print(F("<input type=\"button\" onclick=\"javascript:location=location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '')+'/draft-close';\" value=\"Close draft\"><br />\n"));
           // client.print("<tr><td><pre>"); // debugging the get string
           // client.print(httpGetString);
           // client.print("</pre></td></tr>")
-          client.print("</table></body></html>\n");
+          
+          resetPrint(client);
+          
+          client.print("</td></tr></table></body></html>\n");
           httpGetString = "";
           
           // done, outta here:
@@ -326,6 +359,7 @@ void loop()
     delay(100);
     // close the connection:
     client.stop();
+    lastWebCheck = millis();
   }
 }
 
@@ -338,6 +372,13 @@ void draftPrint(EthernetClient &client, String draftStatus) {
     client.print(" seconds)");
   }
   client.print("<br />");
+}
+
+void resetPrint(EthernetClient &client) {
+  client.print("<br />Last ethernet reset was ");
+  client.print((millis() - lastEthernetReset) / 1000);
+  client.print(" seconds ago<br />");
+
 }
 
 void waterPrint(EthernetClient &client, int waterTemp1, int waterTemp2) {
