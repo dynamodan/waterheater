@@ -63,10 +63,6 @@ void setup()
   
   // start the Ethernet connection and the server:
   resetEthernet();
-  // Ethernet.begin(mac, ip, dns, gateway, subnet);
-  server.begin();
-
-  
   
 }
 
@@ -79,7 +75,8 @@ void resetEthernet() {
   delay(100);
   
   W5100.initialized = false; // this requires a little hackery of w5100.cpp and w5100.h
-  Ethernet.begin(mac, ip, dns, gateway, subnet);
+  Ethernet.begin(mac, ip, dns, gateway, subnet); // this calls softReset() and some other stuff
+  server.begin();
   lastMillis = millis();
   lastWebCheck = millis();
   lastEthernetReset = millis();
