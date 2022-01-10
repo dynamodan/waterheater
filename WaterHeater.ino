@@ -20,12 +20,14 @@
 
 #include <SPI.h>
 #include <Ethernet.h>
+#include <utility/w5100.h>
 
 // thermistor and voltage divider characteristics:
 #define THERMISTORNOMINAL 10000
 #define TEMPERATURENOMINAL 25
 #define BCOEFFICIENT 3950
 #define SERIESRESISTOR 10990
+#define EthernetResetMillis 300000 // 300 seconds = 5 minutes
 
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
@@ -41,6 +43,7 @@ int waterTemp1 = 0;
 int waterTemp2 = 0;
 unsigned long lastMillis = 0;
 unsigned long lastWebCheck = 0;
+unsigned long lastEthernetReset = 0; // debugging
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use 
@@ -59,11 +62,27 @@ void setup()
   lastWebCheck = millis();
   
   // start the Ethernet connection and the server:
-  Ethernet.begin(mac, ip, dns, gateway, subnet);
+  resetEthernet();
+  // Ethernet.begin(mac, ip, dns, gateway, subnet);
   server.begin();
 
   
   
+}
+
+void resetEthernet() {
+  delay(50);             //wait for voltage to stabilize
+  pinMode(7, OUTPUT);   //pin connected to w5100 shield's reset
+  digitalWrite(7, LOW);  //pull line low for 100ms to reset ethernet shield
+  delay(100);
+  digitalWrite(7, HIGH);  //set line high and now ignore pin the rest of the time
+  delay(100);
+  
+  W5100.initialized = false; // this requires a little hackery of w5100.cpp and w5100.h
+  Ethernet.begin(mac, ip, dns, gateway, subnet);
+  lastMillis = millis();
+  lastWebCheck = millis();
+  lastEthernetReset = millis();
 }
 
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
@@ -80,8 +99,9 @@ SIGNAL(TIMER0_COMPA_vect) {
     fireTemp = analogRead(0);
 
     // check how long it's been since we reset the ethernet:
-    if(millis() - lastWebCheck > 300000) { // it's been 5 minutes.  Do a reset.
-      resetFunc();
+    if(millis() - lastWebCheck > EthernetResetMillis) { // it's been 5 minutes.  Do a reset.
+      // resetFunc();
+      resetEthernet();
     }
     
     lastMillis = currentMillis;
@@ -92,8 +112,9 @@ SIGNAL(TIMER0_COMPA_vect) {
   }
 
   // check how long it's been since we reset the ethernet:
-  if(millis() - lastWebCheck > 300000) { // it's been 5 minutes.  Do a reset.
-    resetFunc();
+  if(millis() - lastWebCheck > EthernetResetMillis) { // it's been 5 minutes.  Do a reset.
+    // resetFunc();
+    resetEthernet();
   }
 }
 
@@ -150,7 +171,7 @@ void loop()
 {
   
   if(digitalRead(5) == LOW) {
-    debugSerial(); // this never returns, you have to unground pin 5, and reset. 
+     //debugSerial(); // this never returns, you have to unground pin 5, and reset. 
   }
   
   
@@ -187,7 +208,12 @@ void loop()
           
           firePrint(client, fireTemp);
 
-          client.println(F("</p><br /><input type=\"button\" onclick=\"javascript:location.reload();\" value=\"Check again\"><br /></td></tr></table></body></html>"));
+          client.println(F("</p><br /><input type=\"button\" onclick=\"javascript:location.reload();\" value=\"Check again\"><br />"));
+
+          resetPrint(client);
+          
+          client.println(F("</td></tr></table></body></html>"));
+
           
           // done, outta here:
           break;
@@ -208,6 +234,13 @@ void loop()
     client.stop();
     lastWebCheck = millis();
   }
+}
+
+void resetPrint(EthernetClient &client) {
+  client.print("Last ethernet reset was ");
+  client.print(millis() - lastEthernetReset);
+  client.print(" milliseconds ago<br />");
+
 }
 
 void waterPrint(EthernetClient &client, int waterTemp1, int waterTemp2) {
@@ -264,18 +297,18 @@ void firePrint(EthernetClient &client, unsigned int fireTemp) {
     client.print("HOT FIRE");
   }
   
-  else if(fireTemp > 18) {
+  else if(fireTemp > 20) {
     client.print("MED FIRE");
   }
   
-  else if(fireTemp > 12) {
+  else if(fireTemp > 16) {
     client.print("HOT COALS");
   }
-  else if(fireTemp > 8) {
+  else if(fireTemp > 10) {
     client.print("MED COALS");
   }
 
-  else if(fireTemp > 4) {
+  else if(fireTemp > 6) {
     client.print("LOW COALS");
   }
   
