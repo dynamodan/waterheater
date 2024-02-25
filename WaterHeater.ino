@@ -17,9 +17,18 @@
 
 #include <SPI.h>
 #include <Ethernet.h>
-#include <utility/w5100.h>
-#include <LiquidCrystal.h>
 #include <WString.h>
+
+// Section: Included library 
+#include "HD44780_LCD_PCF8574.h"
+
+// Section: Defines
+#define DISPLAY_DELAY_1 1000
+#define DISPLAY_DELAY_2 2000
+#define DISPLAY_DELAY 5000
+
+// Section: Globals
+HD44780LCD myLCD( 4, 20, 0x27, &Wire); // instantiate an object
 
 
 // thermistor and voltage divider characteristics:
@@ -48,46 +57,45 @@ int fireStarting = 0;
 byte indicatorToggle = 0;
 String draftString = String(14);
 String httpGetString = String(100);
+bool lcdRefresh = false;
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use 
 // (port 80 is default for HTTP):
 EthernetServer server(8000);
 
-// initialize the library by associating any needed LCD interface pin
-// with the arduino pin number it is connected to
-const int rs = 9, en = 8, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-
-
 void setup()
 {
 
   
+  // begin the serial backpack LCD:
+  delay(50);
+  myLCD.PCF8574_LCDInit(myLCD.LCDCursorTypeOff);
+  myLCD.PCF8574_LCDClearScreen();
+  myLCD.PCF8574_LCDBackLightSet(true);
+
+  // set up the LCD's number of columns and rows:
+  // Print a message to the LCD.
+  myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberOne, 0);
+  myLCD.PCF8574_LCDSendString("Two-Tank Wood Burner");
+  myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberTwo, 0);
+  myLCD.PCF8574_LCDSendString("Tank1:    Tank2:    ");
+  myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberThree, 0);
+  myLCD.PCF8574_LCDSendString("Fire:               ");
+  myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberFour, 0);
+  myLCD.PCF8574_LCDSendString("Draft:              ");
   
   // disable the SD card on the ethernet shield:
   pinMode(4, OUTPUT);
   digitalWrite(4, HIGH);
   
-  delay(40);
-  lcd.begin(20, 4);
+  // begin the ethernet card:
+  Ethernet.begin(mac, ip, dns, gateway, subnet); // this calls softReset() and some other stuff
+  server.begin();
 
-  // start the Ethernet connection and the server:
-  resetEthernet();
-  
   delay(1000);
   digitalWrite(4, LOW);
   
-  
-  // set up the LCD's number of columns and rows:
-  // Print a message to the LCD.
-  lcd.print("Two-Tank Wood Burner");
-  lcd.setCursor(0, 1);
-  lcd.print("Tank1:    Tank2:    ");
-  lcd.setCursor(0, 2);
-  lcd.print("Fire:               ");
-  lcd.setCursor(0, 3);
-  lcd.print("Draft:              ");
 
   analogReference(DEFAULT); // use 5v reference
 
@@ -106,23 +114,8 @@ void setup()
   lastMillis = millis();
   lastWebCheck = millis();
   
- 
-}
-
-void resetEthernet() {
-  delay(50);             //wait for voltage to stabilize
-  pinMode(A4, OUTPUT);   //pin connected to w5100 shield's reset
-  digitalWrite(A4, LOW);  //pull line low for 100ms to reset ethernet shield
-  delay(100);
-  digitalWrite(A4, HIGH);  //set line high and now ignore pin the rest of the time
-  delay(100);
-  
-  W5100.initialized = false; // this requires a little hackery of w5100.cpp and w5100.h
-  Ethernet.begin(mac, ip, dns, gateway, subnet); // this calls softReset() and some other stuff
-  server.begin();
-  lastMillis = millis();
-  lastWebCheck = millis();
-  lastEthernetReset = millis();
+  Serial.begin(9600); // open the serial port at 9600 bps:
+  Serial.println("started. ");
 }
 
 // one-second loop here:
@@ -131,18 +124,24 @@ SIGNAL(TIMER0_COMPA_vect) {
   
   // once every second:
   if(currentMillis - lastMillis > 2000) {
+    lcdRefresh = true;
+    lastMillis = currentMillis;
+  }
+ 
+  // when millis() overflows:
+  else if(currentMillis < lastMillis) {
+    lastMillis = currentMillis;
+  }
+
+}
+
+void doLCDRefresh() {
+    
     // print the T1 and T2 temp:
     // reading water temps:
     waterTemp1 = analogRead(1);
     waterTemp2 = analogRead(2);
     
-    // check how long it's been since we reset the ethernet:
-    if(millis() - lastWebCheck > EthernetResetMillis) { // it's been 5 minutes.  Do a reset.
-      // resetFunc();
-      resetEthernet();
-    }
-
-
     // see if the user called for draft at starting or stoking:
     if(analogRead(5) < 500) {
       fireStarting = 900;
@@ -153,40 +152,40 @@ SIGNAL(TIMER0_COMPA_vect) {
     // float waterTempF = ohmsToF((waterTemp1 + waterTemp2) / 2);
     float waterTempF = ohmsToF(waterTemp2); // or not...
     
-    lcd.setCursor(6, 1);
+    myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberTwo, 6);
     if(waterTemp1 > 1000) {
-      lcd.print("+++ ");
+      myLCD.PCF8574_LCDSendString("+++ ");
     } else if(waterTemp1 < 10) {
-      lcd.print("--- ");
+      myLCD.PCF8574_LCDSendString("--- ");
     } else {
-      lcd.print(String(ohmsToF(waterTemp1), 0));
-      lcd.print("F");
+      myLCD.PCF8574_LCDSendString(String(ohmsToF(waterTemp1), 0).c_str());
+      myLCD.PCF8574_LCDSendChar("F");
     }
-    lcd.setCursor(16, 1);
+    myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberTwo, 16);
     if(waterTemp2 > 1000) {
-      lcd.print("+++ ");
+      myLCD.PCF8574_LCDSendString("+++ ");
     } else if(waterTemp2 < 10) {
-      lcd.print("--- ");
+      myLCD.PCF8574_LCDSendString("--- ");
     } else {
-      lcd.print(String(ohmsToF(waterTemp2), 0));
-      lcd.print("F");
+      myLCD.PCF8574_LCDSendString(String(ohmsToF(waterTemp2), 0).c_str());
+      myLCD.PCF8574_LCDSendString("F");
     }
     
     // print the Fire temp:
     fireTemp = analogRead(0);
     float fireTempF = (fireTemp / .54) + 70;
     if(fireTemp > 0) {
-      lcd.setCursor(5, 2);
-      lcd.print(String(fireTempF, 0));
-      lcd.print("F ");
+      myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberThree, 5);
+      myLCD.PCF8574_LCDSendString(String(fireTempF, 0).c_str());
+      myLCD.PCF8574_LCDSendString("F ");
     } else {
-      lcd.setCursor(5, 2);
-      lcd.print("---   ");
+      myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberThree, 5);
+      myLCD.PCF8574_LCDSendString("---   ");
     }
 
     // do draft control logic:
     // is there a fire?
-    lcd.setCursor(6, 3);
+    myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberFour, 6);
     draftString = "---";
     
     // fire is going:
@@ -222,28 +221,19 @@ SIGNAL(TIMER0_COMPA_vect) {
       }
     }
     
-    lcd.print(draftString);
+    myLCD.PCF8574_LCDSendString(draftString.c_str());
     
-    lastMillis = currentMillis;
 
     // toggle the indicator:
     if(indicatorToggle == 0) {
       indicatorToggle = 1;
-      lcd.setCursor(3, 0);
-      lcd.print("-");
+      myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberOne, 3);
+      myLCD.PCF8574_LCDSendString("-");
     } else {
       indicatorToggle = 0;
-      lcd.setCursor(3, 0);
-      lcd.print(" ");
+      myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberOne, 3);
+      myLCD.PCF8574_LCDSendString(" ");
     }
-  }
-  
-  // when millis() overflows:
-  else if(currentMillis < lastMillis) {
-    lastMillis = currentMillis;
-  }
-
-  
   
 }
 
@@ -286,8 +276,7 @@ void loop()
   // if(digitalRead(5) == LOW) {
   //  debugSerial(); // this never returns, you have to unground pin 5, and reset. 
   //}
-  
-  
+
   // listen for incoming clients
   EthernetClient client = server.available();
   if (client) {
@@ -337,8 +326,6 @@ void loop()
           // client.print(httpGetString);
           // client.print("</pre></td></tr>")
           
-          resetPrint(client);
-          
           client.print("</td></tr></table></body></html>\n");
           httpGetString = "";
           
@@ -361,6 +348,13 @@ void loop()
     client.stop();
     lastWebCheck = millis();
   }
+
+  if(lcdRefresh == true) {
+    Serial.print("refresh lcd at ");
+    Serial.println(millis());
+    doLCDRefresh();
+    lcdRefresh = false;
+  }
 }
 
 void draftPrint(EthernetClient &client, String draftStatus) {
@@ -372,13 +366,6 @@ void draftPrint(EthernetClient &client, String draftStatus) {
     client.print(" seconds)");
   }
   client.print("<br />");
-}
-
-void resetPrint(EthernetClient &client) {
-  client.print("<br />Last ethernet reset was ");
-  client.print((millis() - lastEthernetReset) / 1000);
-  client.print(" seconds ago<br />");
-
 }
 
 void waterPrint(EthernetClient &client, int waterTemp1, int waterTemp2) {
