@@ -18,6 +18,15 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <WString.h>
+#include <OneWire.h>
+#include <DS18B20.h>
+
+/*-----( Declare Constants and Pin Numbers )-----*/
+#define SENSOR_PIN 2  // Any pin 2 to 12 (not 13) and A0 to A5
+
+/*-----( Declare objects )-----*/
+// OneWire sensorBus(SENSOR_PIN);  // Create a 1-wire object
+DS18B20 ds(SENSOR_PIN);
 
 // Section: Included library 
 #include "HD44780_LCD_PCF8574.h"
@@ -48,8 +57,9 @@ byte subnet[] = { 255, 255, 255, 0 };
 
 // these are for the analogReads:
 unsigned int fireTemp = 0;
-int waterTemp1 = 0;
-int waterTemp2 = 0;
+float waterTemp1 = 0;
+float waterTemp2 = 0;
+float outsideTemp = 0;
 unsigned long lastMillis = 0;
 unsigned long lastWebCheck = 0;
 unsigned long lastEthernetReset = 0; // debugging
@@ -58,6 +68,10 @@ byte indicatorToggle = 0;
 String draftString = String(14);
 String httpGetString = String(100);
 bool lcdRefresh = false;
+
+uint8_t waterT1[] = {0x28, 0x94, 0x65, 0x44, 0xD4, 0xE1, 0x3C, 0x75};
+uint8_t waterT2[] = {0x28, 0x4E, 0xDB, 0x44, 0xD4, 0xE1, 0x3C, 0x93};
+uint8_t outsideT[] = {0x28, 0x27, 0xAD, 0x44, 0xD4, 0xE1, 0x3C, 0x37};
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use 
@@ -81,7 +95,7 @@ void setup()
   myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberTwo, 0);
   myLCD.PCF8574_LCDSendString("Tank1:    Tank2:    ");
   myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberThree, 0);
-  myLCD.PCF8574_LCDSendString("Fire:               ");
+  myLCD.PCF8574_LCDSendString("Fire:       Out:    ");
   myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberFour, 0);
   myLCD.PCF8574_LCDSendString("Draft:              ");
   
@@ -113,9 +127,11 @@ void setup()
   TIMSK0 |= _BV(OCIE0A);
   lastMillis = millis();
   lastWebCheck = millis();
-  
+
   Serial.begin(9600); // open the serial port at 9600 bps:
   Serial.println("started. ");
+
+  // discoverOneWireDevices();
 }
 
 // one-second loop here:
@@ -135,12 +151,21 @@ SIGNAL(TIMER0_COMPA_vect) {
 
 }
 
+float DS18Read(uint8_t *address) {
+  if(ds.select(address)) {
+    return ds.getTempF();
+  } else {
+    return -999.99; // to represent a bad read
+  }
+}
+
 void doLCDRefresh() {
     
     // print the T1 and T2 temp:
     // reading water temps:
-    waterTemp1 = analogRead(1);
-    waterTemp2 = analogRead(2);
+    waterTemp1 = DS18Read(waterT1);
+    waterTemp2 = DS18Read(waterT2);
+    outsideTemp = DS18Read(outsideT);
     
     // see if the user called for draft at starting or stoking:
     if(analogRead(5) < 500) {
@@ -149,8 +174,8 @@ void doLCDRefresh() {
     if(fireStarting > 0) { fireStarting--; fireStarting--; } // because we get called every 2 seconds
     
     // take an average to determine what we should do about draft:
-    // float waterTempF = ohmsToF((waterTemp1 + waterTemp2) / 2);
-    float waterTempF = ohmsToF(waterTemp2); // or not...
+    // float waterTempF = ((waterTemp1 + waterTemp2) / 2);
+    float waterTempF = (waterTemp2); // or not...
     
     myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberTwo, 6);
     if(waterTemp1 > 1000) {
@@ -158,8 +183,8 @@ void doLCDRefresh() {
     } else if(waterTemp1 < 10) {
       myLCD.PCF8574_LCDSendString("--- ");
     } else {
-      myLCD.PCF8574_LCDSendString(String(ohmsToF(waterTemp1), 0).c_str());
-      myLCD.PCF8574_LCDSendChar("F");
+      myLCD.PCF8574_LCDSendString(String(waterTemp1, 0).c_str());
+      myLCD.PCF8574_LCDSendString("F");
     }
     myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberTwo, 16);
     if(waterTemp2 > 1000) {
@@ -167,7 +192,17 @@ void doLCDRefresh() {
     } else if(waterTemp2 < 10) {
       myLCD.PCF8574_LCDSendString("--- ");
     } else {
-      myLCD.PCF8574_LCDSendString(String(ohmsToF(waterTemp2), 0).c_str());
+      myLCD.PCF8574_LCDSendString(String(waterTemp2, 0).c_str());
+      myLCD.PCF8574_LCDSendString("F");
+    }
+    
+    myLCD.PCF8574_LCDGOTO(myLCD.LCDLineNumberThree, 16);
+    if(outsideTemp > 1000) {
+      myLCD.PCF8574_LCDSendString("+++ ");
+    } else if(outsideTemp < 10) {
+      myLCD.PCF8574_LCDSendString("--- ");
+    } else {
+      myLCD.PCF8574_LCDSendString(String(outsideTemp, 0).c_str());
       myLCD.PCF8574_LCDSendString("F");
     }
     
@@ -256,12 +291,10 @@ void debugSerialLoop() {
   Serial.print(millis());
   Serial.print("\n");
   Serial.print("top: ");
-  Serial.print(ohmsToF(waterTemp2), 1);
+  Serial.print(waterTemp2, 1);
   Serial.print("F\nbottom: ");
-  Serial.print(ohmsToF(waterTemp1), 1);
+  Serial.print(waterTemp1, 1);
   Serial.print("F\n");
-  Serial.print("analogRead: ");
-  Serial.print(waterTemp1);
   Serial.print("\n");
   Serial.print("fire: ");
   Serial.print(fireTemp);
@@ -314,6 +347,8 @@ void loop()
           client.println(F("<br /><br /><p class=\"big\">Two-Tank Wood Burner<br>Status<br /><br />"));
           
           waterPrint(client, waterTemp2, waterTemp1);
+
+          ambientPrint(client, outsideTemp);
           
           firePrint(client, fireTemp);
 
@@ -352,6 +387,13 @@ void loop()
   if(lcdRefresh == true) {
     Serial.print("refresh lcd at ");
     Serial.println(millis());
+    Serial.print("Tank 1: ");
+    Serial.println(waterTemp1);
+    Serial.print("Tank 2: ");
+    Serial.println(waterTemp2);
+    Serial.print("Outside: ");
+    Serial.println(outsideTemp);
+    
     doLCDRefresh();
     lcdRefresh = false;
   }
@@ -368,12 +410,19 @@ void draftPrint(EthernetClient &client, String draftStatus) {
   client.print("<br />");
 }
 
-void waterPrint(EthernetClient &client, int waterTemp1, int waterTemp2) {
+void waterPrint(EthernetClient &client, float waterTemp1, float waterTemp2) {
   client.print("Tank1: ");
-  client.print(ohmsToF(waterTemp2), 0);
+  client.print((waterTemp2), 0);
   client.print("&deg;F<br />Tank2: ");
-  client.print(ohmsToF(waterTemp1), 0);
+  client.print((waterTemp1), 0);
   client.println("&deg;F<br />");
+  
+}
+
+void ambientPrint(EthernetClient &client, float temp) {
+  client.print("Outdoor: ");
+  client.print((temp), 0);
+  client.print("&deg;F<br />");
   
 }
 
@@ -381,6 +430,7 @@ float celciusToFahrenheit(double temp) {
   return (temp * 9) / 5 + 32;
 }
 
+// unused, could probably remove:
 double ohmsToF(int rawTemp) {
   double Temp;
   float resistor;
@@ -445,3 +495,35 @@ void stylePrint(EthernetClient &client, unsigned int fireTemp) {
   
   client.println(F(".main{height:100%;width:100%;} .big{font-size:40px;} input{width:200px;height:100px;margin-bottom:1em;font-size:35px;}</style>"));
 }
+
+/*-----( Declare User-written Functions )-----*/
+/*
+void discoverOneWireDevices(void) {
+  byte i;
+  byte present = 0;
+  byte data[12];
+  byte addr[8];
+
+  Serial.print("Looking for 1-Wire devices...\n\r");// "\n\r" is NewLine 
+  while(sensorBus.search(addr)) {
+    Serial.print("\n\r\n\rFound \'1-Wire\' device with address:\n\r");
+    for( i = 0; i < 8; i++) {
+      Serial.print("0x");
+      if (addr[i] < 16) {
+        Serial.print('0');
+      }
+      Serial.print(addr[i], HEX);
+      if (i < 7) {
+        Serial.print(", ");
+      }
+    }
+    if ( OneWire::crc8( addr, 7) != addr[7]) {
+      Serial.print("CRC is not valid!\n\r");
+      return;
+    }
+  }
+  Serial.println();
+  Serial.print("Done");
+  sensorBus.reset_search();
+  return;
+} */
